@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { refreshAccessToken, REFRESH_COOKIE } from "@/app/lib/spotifyAuth";
+import {
+  SETTINGS_COOKIE,
+  parseSettingsCookie,
+  resolveConfig,
+} from "@/app/lib/serverConfig";
 
 export const runtime = "nodejs";
 
@@ -13,8 +18,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ connected: false }, { status: 401 });
   }
 
+  const cfg = resolveConfig(
+    parseSettingsCookie(req.cookies.get(SETTINGS_COOKIE)?.value)
+  );
+
   try {
-    const tokens = await refreshAccessToken(refreshToken);
+    const tokens = await refreshAccessToken(refreshToken, cfg);
     const res = NextResponse.json({
       connected: true,
       accessToken: tokens.access_token,

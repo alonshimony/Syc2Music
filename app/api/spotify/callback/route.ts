@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exchangeCodeForTokens, REFRESH_COOKIE } from "@/app/lib/spotifyAuth";
+import {
+  SETTINGS_COOKIE,
+  parseSettingsCookie,
+  resolveConfig,
+} from "@/app/lib/serverConfig";
 
 export const runtime = "nodejs";
 
@@ -23,9 +28,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(home);
   }
 
+  const cfg = resolveConfig(
+    parseSettingsCookie(req.cookies.get(SETTINGS_COOKIE)?.value)
+  );
+
   let tokens;
   try {
-    tokens = await exchangeCodeForTokens(code);
+    tokens = await exchangeCodeForTokens(code, cfg);
   } catch {
     home.searchParams.set("spotify_error", "token_exchange_failed");
     return NextResponse.redirect(home);

@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { buildAcrSignature } from "@/app/lib/acrSign";
-import { getConfig } from "@/app/lib/serverConfig";
+import {
+  SETTINGS_COOKIE,
+  parseSettingsCookie,
+  resolveConfig,
+} from "@/app/lib/serverConfig";
 import type { IdentifyResponse } from "@/app/lib/types";
 
 export const runtime = "nodejs";
@@ -16,7 +20,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<IdentifyRespo
     acrHost: host,
     acrAccessKey: accessKey,
     acrAccessSecret: accessSecret,
-  } = getConfig();
+  } = resolveConfig(parseSettingsCookie(req.cookies.get(SETTINGS_COOKIE)?.value));
 
   if (!host || !accessKey || !accessSecret) {
     return NextResponse.json(

@@ -58,9 +58,11 @@ Open http://localhost:3000 (mic access works on `localhost` without HTTPS).
 ### Configuration — two options
 
 - **In-app Settings page (`/settings`)** — enter your ACRCloud + Spotify credentials
-  and tune the sync behavior right in the browser. Credentials are saved server-side to
-  `.data/settings.json` (git-ignored) and take precedence over env vars; secrets are
-  write-only and never sent back to the browser. Sync tuning is stored per-browser.
+  and tune the sync behavior right in the browser. Credentials are stored in a secure,
+  httpOnly cookie (per-browser) and take precedence over env vars; secrets are
+  write-only and never sent back to the browser. This works on read-only serverless
+  hosts (e.g. Vercel) since it needs no writable disk. Sync tuning is stored per-browser
+  in localStorage.
 - **Environment variables** — alternatively `cp .env.example .env.local` and fill it in.
   These act as defaults when nothing is set on the Settings page.
 

@@ -2,30 +2,25 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   AppSettings,
   SECRET_FIELDS,
+  SETTINGS_COOKIE,
+  SETTINGS_FIELDS,
   describeSettings,
-  readSettings,
-  writeSettings,
+  parseSettingsCookie,
+  serializeSettingsCookie,
+  settingsCookieOptions,
 } from "@/app/lib/serverConfig";
 
 export const runtime = "nodejs";
 
-const FIELDS: (keyof AppSettings)[] = [
-  "acrHost",
-  "acrAccessKey",
-  "acrAccessSecret",
-  "spotifyClientId",
-  "spotifyClientSecret",
-  "spotifyRedirectUri",
-];
-
 /** Returns the current resolved config (secrets masked) + where each value comes from. */
-export async function GET() {
-  return NextResponse.json({ settings: describeSettings() });
+export async function GET(req: NextRequest) {
+  const settings = parseSettingsCookie(req.cookies.get(SETTINGS_COOKIE)?.value);
+  return NextResponse.json({ settings: describeSettings(settings) });
 }
 
 /**
- * Persists settings to the on-disk override file.
- * - Non-secret fields: an empty string clears the file override (falls back to env).
+ * Persists settings to an httpOnly cookie.
+ * - Non-secret fields: an empty string clears the override (falls back to env).
  * - Secret fields: an empty/absent value leaves the stored secret unchanged, so the
  *   UI never has to round-trip the secret back to the browser.
  */
@@ -34,22 +29,18 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json(
-      { error: "Invalid JSON body." },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const current = readSettings();
+  const current = parseSettingsCookie(req.cookies.get(SETTINGS_COOKIE)?.value);
   const next: AppSettings = { ...current };
 
-  for (const field of FIELDS) {
+  for (const field of SETTINGS_FIELDS) {
     if (!(field in body)) continue;
     const value = body[field];
-    const isSecret = SECRET_FIELDS.includes(field);
-
     if (typeof value !== "string") continue;
     const trimmed = value.trim();
+    const isSecret = SECRET_FIELDS.includes(field);
 
     if (isSecret) {
       // Only overwrite a secret when a new non-empty value is supplied.
@@ -61,14 +52,14 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  try {
-    writeSettings(next);
-  } catch (err: any) {
-    return NextResponse.json(
-      { error: "Failed to save settings: " + (err?.message ?? String(err)) },
-      { status: 500 }
-    );
-  }
-
-  return NextResponse.json({ ok: true, settings: describeSettings() });
+  const res = NextResponse.json({
+    ok: true,
+    settings: describeSettings(next),
+  });
+  res.cookies.set(
+    SETTINGS_COOKIE,
+    serializeSettingsCookie(next),
+    settingsCookieOptions()
+  );
+  return res;
 }

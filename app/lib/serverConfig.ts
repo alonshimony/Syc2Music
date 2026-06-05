@@ -1,13 +1,11 @@
 // Server-side configuration store. Values can come from two places:
-//   1. Environment variables (.env.local) — the original mechanism.
-//   2. A JSON file written by the in-app Settings page (takes precedence).
+//   1. Environment variables — the original mechanism / deploy-time defaults.
+//   2. An httpOnly cookie written by the in-app Settings page (takes precedence).
 //
-// This lets the user configure everything from the browser without editing files,
-// while still honoring env vars as defaults. The file lives outside version control
-// (.data/ is gitignored) and is only ever read/written on the server.
-
-import fs from "fs";
-import path from "path";
+// A cookie is used (rather than a file) so this works on read-only serverless
+// filesystems (e.g. Vercel's /var/task) as well as locally, with no database. The
+// cookie is httpOnly + secure, so credentials are never readable from client JS and
+// only travel over HTTPS in production. Settings are therefore per-browser.
 
 export interface AppSettings {
   acrHost?: string;
@@ -18,29 +16,15 @@ export interface AppSettings {
   spotifyRedirectUri?: string;
 }
 
+export type ResolvedConfig = Required<AppSettings>;
+
 /** Fields the UI treats as secret — never returned to the browser in clear text. */
 export const SECRET_FIELDS: ReadonlyArray<keyof AppSettings> = [
   "acrAccessSecret",
   "spotifyClientSecret",
 ];
 
-const DATA_DIR = path.join(process.cwd(), ".data");
-const SETTINGS_PATH = path.join(DATA_DIR, "settings.json");
-
-export function readSettings(): AppSettings {
-  try {
-    const raw = fs.readFileSync(SETTINGS_PATH, "utf8");
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? (parsed as AppSettings) : {};
-  } catch {
-    return {};
-  }
-}
-
-export function writeSettings(next: AppSettings): void {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(next, null, 2), "utf8");
-}
+export const SETTINGS_COOKIE = "s2m_settings";
 
 const ENV_KEYS: Record<keyof AppSettings, string> = {
   acrHost: "ACR_HOST",
@@ -51,55 +35,79 @@ const ENV_KEYS: Record<keyof AppSettings, string> = {
   spotifyRedirectUri: "SPOTIFY_REDIRECT_URI",
 };
 
-/** Resolved value for one key: file override first, then env var. */
-export function getConfigValue(key: keyof AppSettings): string {
-  const file = readSettings();
-  const fromFile = file[key];
-  if (fromFile && fromFile.trim() !== "") return fromFile.trim();
-  return process.env[ENV_KEYS[key]] ?? "";
+export const SETTINGS_FIELDS = Object.keys(ENV_KEYS) as (keyof AppSettings)[];
+
+/** Parse the settings cookie value into an AppSettings object. */
+export function parseSettingsCookie(value: string | undefined): AppSettings {
+  if (!value) return {};
+  try {
+    const json = Buffer.from(value, "base64").toString("utf8");
+    const parsed = JSON.parse(json);
+    return parsed && typeof parsed === "object" ? (parsed as AppSettings) : {};
+  } catch {
+    return {};
+  }
 }
 
-/** All resolved values at once (used by request handlers). */
-export function getConfig(): Required<AppSettings> {
-  const file = readSettings();
-  const out = {} as Required<AppSettings>;
-  (Object.keys(ENV_KEYS) as (keyof AppSettings)[]).forEach((k) => {
-    const fromFile = file[k];
-    out[k] =
-      fromFile && fromFile.trim() !== ""
-        ? fromFile.trim()
-        : process.env[ENV_KEYS[k]] ?? "";
-  });
+/** Serialize settings for storage in a cookie. */
+export function serializeSettingsCookie(settings: AppSettings): string {
+  return Buffer.from(JSON.stringify(settings), "utf8").toString("base64");
+}
+
+/** Merge cookie settings over env vars into a fully-resolved config. */
+export function resolveConfig(settings: AppSettings): ResolvedConfig {
+  const out = {} as ResolvedConfig;
+  for (const key of SETTINGS_FIELDS) {
+    const fromCookie = settings[key];
+    out[key] =
+      fromCookie && fromCookie.trim() !== ""
+        ? fromCookie.trim()
+        : process.env[ENV_KEYS[key]] ?? "";
+  }
   return out;
 }
 
 /** Where a resolved value currently comes from — for display in the UI. */
-export type ConfigSource = "file" | "env" | "unset";
+export type ConfigSource = "cookie" | "env" | "unset";
 
-export function describeSettings(): Record<
-  keyof AppSettings,
-  { value: string; isSet: boolean; secret: boolean; source: ConfigSource }
-> {
-  const file = readSettings();
-  const result = {} as Record<
-    keyof AppSettings,
-    { value: string; isSet: boolean; secret: boolean; source: ConfigSource }
-  >;
+export interface FieldDescription {
+  value: string;
+  isSet: boolean;
+  secret: boolean;
+  source: ConfigSource;
+}
 
-  (Object.keys(ENV_KEYS) as (keyof AppSettings)[]).forEach((k) => {
-    const fromFile = file[k] && file[k]!.trim() !== "" ? file[k]!.trim() : "";
-    const fromEnv = process.env[ENV_KEYS[k]] ?? "";
-    const resolved = fromFile || fromEnv;
-    const source: ConfigSource = fromFile ? "file" : fromEnv ? "env" : "unset";
-    const secret = SECRET_FIELDS.includes(k);
-    result[k] = {
+export function describeSettings(
+  settings: AppSettings
+): Record<keyof AppSettings, FieldDescription> {
+  const result = {} as Record<keyof AppSettings, FieldDescription>;
+
+  for (const key of SETTINGS_FIELDS) {
+    const fromCookie =
+      settings[key] && settings[key]!.trim() !== "" ? settings[key]!.trim() : "";
+    const fromEnv = process.env[ENV_KEYS[key]] ?? "";
+    const resolved = fromCookie || fromEnv;
+    const source: ConfigSource = fromCookie ? "cookie" : fromEnv ? "env" : "unset";
+    const secret = SECRET_FIELDS.includes(key);
+    result[key] = {
       // Mask secrets; surface non-secret values so the user can confirm them.
       value: secret ? "" : resolved,
       isSet: resolved !== "",
       secret,
       source,
     };
-  });
+  }
 
   return result;
+}
+
+/** Cookie options shared by every place that writes the settings cookie. */
+export function settingsCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax" as const,
+    path: "/",
+    maxAge: 60 * 60 * 24 * 365, // 1 year
+  };
 }

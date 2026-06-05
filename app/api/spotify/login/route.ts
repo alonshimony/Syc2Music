@@ -1,14 +1,18 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { SPOTIFY_SCOPES } from "@/app/lib/spotifyAuth";
-import { getConfig } from "@/app/lib/serverConfig";
+import {
+  SETTINGS_COOKIE,
+  parseSettingsCookie,
+  resolveConfig,
+} from "@/app/lib/serverConfig";
 
 export const runtime = "nodejs";
 
 /** Redirects the browser to Spotify's authorization page. */
-export async function GET() {
+export async function GET(req: NextRequest) {
   const { spotifyClientId: clientId, spotifyRedirectUri: redirectUri } =
-    getConfig();
+    resolveConfig(parseSettingsCookie(req.cookies.get(SETTINGS_COOKIE)?.value));
 
   if (!clientId || !redirectUri) {
     return NextResponse.json(

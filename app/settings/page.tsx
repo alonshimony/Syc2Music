@@ -108,7 +108,7 @@ export default function SettingsPage() {
   };
 
   const sourceBadge = (f: FieldDesc) => {
-    if (f.source === "file") return <span className="badge ok">saved here</span>;
+    if (f.source === "cookie") return <span className="badge ok">saved here</span>;
     if (f.source === "env") return <span className="badge">from .env</span>;
     return <span className="badge">not set</span>;
   };
@@ -126,9 +126,9 @@ export default function SettingsPage() {
       <div className="panel">
         <h2 style={{ marginTop: 0, fontSize: 18 }}>Credentials</h2>
         <p className="hint" style={{ marginTop: 0 }}>
-          Saved on the server (in <code>.data/settings.json</code>, git-ignored) and
-          take precedence over <code>.env.local</code>. Secrets are write-only — they
-          are never sent back to the browser.
+          Saved to a secure, httpOnly cookie for this browser and take precedence over
+          environment variables. Secrets are write-only — they are never sent back to
+          the browser.
         </p>
 
         {CRED_FIELDS.map(({ key, label, hint, placeholder }) => {

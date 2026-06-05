@@ -2,7 +2,7 @@
 // is stored in an httpOnly cookie; the short-lived access token is handed to the
 // browser on demand for the Web Playback SDK.
 
-import { getConfig } from "./serverConfig";
+import type { ResolvedConfig } from "./serverConfig";
 
 export const REFRESH_COOKIE = "s2m_refresh";
 
@@ -22,43 +22,47 @@ export interface SpotifyTokenResponse {
   scope?: string;
 }
 
-function basicAuthHeader(): string {
-  const { spotifyClientId, spotifyClientSecret } = getConfig();
+function basicAuthHeader(cfg: ResolvedConfig): string {
   return (
     "Basic " +
-    Buffer.from(`${spotifyClientId}:${spotifyClientSecret}`).toString("base64")
+    Buffer.from(`${cfg.spotifyClientId}:${cfg.spotifyClientSecret}`).toString(
+      "base64"
+    )
   );
 }
 
 export async function exchangeCodeForTokens(
-  code: string
+  code: string,
+  cfg: ResolvedConfig
 ): Promise<SpotifyTokenResponse> {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code,
-    redirect_uri: getConfig().spotifyRedirectUri,
+    redirect_uri: cfg.spotifyRedirectUri,
   });
-  return tokenRequest(body);
+  return tokenRequest(body, cfg);
 }
 
 export async function refreshAccessToken(
-  refreshToken: string
+  refreshToken: string,
+  cfg: ResolvedConfig
 ): Promise<SpotifyTokenResponse> {
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     refresh_token: refreshToken,
   });
-  return tokenRequest(body);
+  return tokenRequest(body, cfg);
 }
 
 async function tokenRequest(
-  body: URLSearchParams
+  body: URLSearchParams,
+  cfg: ResolvedConfig
 ): Promise<SpotifyTokenResponse> {
   const res = await fetch("https://accounts.spotify.com/api/token", {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: basicAuthHeader(),
+      Authorization: basicAuthHeader(cfg),
     },
     body,
   });
