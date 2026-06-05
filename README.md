@@ -50,11 +50,19 @@ See `app/lib/syncMath.ts` for the (unit-tested) core math.
 
 ```bash
 npm install
-cp .env.example .env.local   # fill in your ACRCloud + Spotify credentials
 npm run dev
 ```
 
 Open http://localhost:3000 (mic access works on `localhost` without HTTPS).
+
+### Configuration — two options
+
+- **In-app Settings page (`/settings`)** — enter your ACRCloud + Spotify credentials
+  and tune the sync behavior right in the browser. Credentials are saved server-side to
+  `.data/settings.json` (git-ignored) and take precedence over env vars; secrets are
+  write-only and never sent back to the browser. Sync tuning is stored per-browser.
+- **Environment variables** — alternatively `cp .env.example .env.local` and fill it in.
+  These act as defaults when nothing is set on the Settings page.
 
 1. Click **Connect Spotify** and authorize (Premium account).
 2. Play a well-known song from another speaker/device.

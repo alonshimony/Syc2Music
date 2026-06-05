@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { buildAcrSignature } from "@/app/lib/acrSign";
+import { getConfig } from "@/app/lib/serverConfig";
 import type { IdentifyResponse } from "@/app/lib/types";
 
 export const runtime = "nodejs";
@@ -11,13 +12,19 @@ export const runtime = "nodejs";
  * play_offset_ms, our sync anchor). Secrets never leave the server.
  */
 export async function POST(req: NextRequest): Promise<NextResponse<IdentifyResponse>> {
-  const host = process.env.ACR_HOST;
-  const accessKey = process.env.ACR_ACCESS_KEY;
-  const accessSecret = process.env.ACR_ACCESS_SECRET;
+  const {
+    acrHost: host,
+    acrAccessKey: accessKey,
+    acrAccessSecret: accessSecret,
+  } = getConfig();
 
   if (!host || !accessKey || !accessSecret) {
     return NextResponse.json(
-      { status: "error", message: "ACRCloud credentials are not configured on the server." },
+      {
+        status: "error",
+        message:
+          "ACRCloud is not configured. Add credentials on the Settings page.",
+      },
       { status: 500 }
     );
   }

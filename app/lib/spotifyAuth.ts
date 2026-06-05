@@ -2,6 +2,8 @@
 // is stored in an httpOnly cookie; the short-lived access token is handed to the
 // browser on demand for the Web Playback SDK.
 
+import { getConfig } from "./serverConfig";
+
 export const REFRESH_COOKIE = "s2m_refresh";
 
 export const SPOTIFY_SCOPES = [
@@ -21,9 +23,11 @@ export interface SpotifyTokenResponse {
 }
 
 function basicAuthHeader(): string {
-  const id = process.env.SPOTIFY_CLIENT_ID ?? "";
-  const secret = process.env.SPOTIFY_CLIENT_SECRET ?? "";
-  return "Basic " + Buffer.from(`${id}:${secret}`).toString("base64");
+  const { spotifyClientId, spotifyClientSecret } = getConfig();
+  return (
+    "Basic " +
+    Buffer.from(`${spotifyClientId}:${spotifyClientSecret}`).toString("base64")
+  );
 }
 
 export async function exchangeCodeForTokens(
@@ -32,7 +36,7 @@ export async function exchangeCodeForTokens(
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code,
-    redirect_uri: process.env.SPOTIFY_REDIRECT_URI ?? "",
+    redirect_uri: getConfig().spotifyRedirectUri,
   });
   return tokenRequest(body);
 }

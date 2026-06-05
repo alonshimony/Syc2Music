@@ -5,15 +5,10 @@
 import { AudioCapture } from "./audioCapture";
 import { SpotifyController } from "./spotifyPlayer";
 import { driftMs, targetSeekMs, type SyncAnchor } from "./syncMath";
+import { loadSyncSettings, type SyncSettings } from "./syncSettings";
 import type { IdentifyResponse, IdentifyResult, SyncPhase } from "./types";
 
 const LATENCY_STORAGE_KEY = "s2m_start_latency_ms";
-const DEFAULT_START_LATENCY_MS = 400;
-const CLIP_DURATION_MS = 6000;
-/** Don't bother correcting drift smaller than this (perceptually inaudible-ish). */
-const DRIFT_DEADBAND_MS = 60;
-/** How much we trust each drift measurement when updating the learned latency. */
-const LATENCY_LEARN_RATE = 0.5;
 
 export interface SyncCallbacks {
   onPhase: (phase: SyncPhase, detail?: string) => void;
@@ -29,16 +24,23 @@ export class SyncController {
   private anchor: SyncAnchor | null = null;
   private currentTrackId: string | null = null;
   private userTrimMs = 0;
-  private startLatencyMs = DEFAULT_START_LATENCY_MS;
+  private settings: SyncSettings;
+  private startLatencyMs: number;
 
   constructor(getToken: () => Promise<string>, cb: SyncCallbacks) {
     this.spotify = new SpotifyController(getToken);
     this.cb = cb;
-    this.startLatencyMs = loadLearnedLatency();
+    this.settings = loadSyncSettings();
+    this.startLatencyMs = loadLearnedLatency(this.settings.defaultStartLatencyMs);
   }
 
   setUserTrimMs(ms: number): void {
     this.userTrimMs = ms;
+  }
+
+  /** Re-read sync tuning (e.g. after the user changes it on the Settings page). */
+  reloadSettings(): void {
+    this.settings = loadSyncSettings();
   }
 
   /** Connect the Spotify player (loads SDK, registers device). */
@@ -53,7 +55,7 @@ export class SyncController {
   async listenAndSync(): Promise<void> {
     try {
       this.cb.onPhase("listening");
-      const clip = await this.capture.recordClip(CLIP_DURATION_MS);
+      const clip = await this.capture.recordClip(this.settings.clipDurationMs);
 
       this.cb.onPhase("identifying");
       const result = await this.identify(clip.wav);
@@ -137,13 +139,13 @@ export class SyncController {
 
     // The portion of drift not explained by user trim reflects start-latency error.
     this.startLatencyMs = clamp(
-      this.startLatencyMs + drift * LATENCY_LEARN_RATE,
+      this.startLatencyMs + drift * this.settings.latencyLearnRate,
       0,
       3000
     );
     saveLearnedLatency(this.startLatencyMs);
 
-    if (Math.abs(drift) > DRIFT_DEADBAND_MS) {
+    if (Math.abs(drift) > this.settings.driftDeadbandMs) {
       // Re-project to "now" at the moment we actually issue the seek.
       const seek =
         targetSeekMs({
@@ -184,11 +186,11 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
-function loadLearnedLatency(): number {
-  if (typeof window === "undefined") return DEFAULT_START_LATENCY_MS;
+function loadLearnedLatency(fallback: number): number {
+  if (typeof window === "undefined") return fallback;
   const raw = window.localStorage.getItem(LATENCY_STORAGE_KEY);
   const n = raw ? Number(raw) : NaN;
-  return Number.isFinite(n) ? n : DEFAULT_START_LATENCY_MS;
+  return Number.isFinite(n) ? n : fallback;
 }
 
 function saveLearnedLatency(ms: number): void {

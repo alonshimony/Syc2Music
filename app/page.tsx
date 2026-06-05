@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SyncController } from "./lib/syncController";
 import type { IdentifyResult, SyncPhase } from "./lib/types";
@@ -114,7 +115,12 @@ export default function Home() {
 
   return (
     <main className="wrap">
-      <h1>🎧 Sync2Music</h1>
+      <div className="row between">
+        <h1>🎧 Sync2Music</h1>
+        <Link href="/settings">
+          <button className="btn-ghost">⚙️ Settings</button>
+        </Link>
+      </div>
       <p className="subtitle">
         Hears the music playing around you, identifies it, and plays the same song
         from the same spot on Spotify — lined up with the live audio.

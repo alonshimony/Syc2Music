@@ -1,17 +1,18 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { SPOTIFY_SCOPES } from "@/app/lib/spotifyAuth";
+import { getConfig } from "@/app/lib/serverConfig";
 
 export const runtime = "nodejs";
 
 /** Redirects the browser to Spotify's authorization page. */
 export async function GET() {
-  const clientId = process.env.SPOTIFY_CLIENT_ID;
-  const redirectUri = process.env.SPOTIFY_REDIRECT_URI;
+  const { spotifyClientId: clientId, spotifyRedirectUri: redirectUri } =
+    getConfig();
 
   if (!clientId || !redirectUri) {
     return NextResponse.json(
-      { error: "Spotify is not configured on the server." },
+      { error: "Spotify is not configured. Add credentials on the Settings page." },
       { status: 500 }
     );
   }
