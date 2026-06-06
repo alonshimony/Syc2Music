@@ -49,6 +49,15 @@ export class SyncController {
   }
 
   /**
+   * Unlock browser audio. MUST be called synchronously from a user gesture
+   * (e.g. the click handler) BEFORE the long record/identify pipeline, or the
+   * browser blocks autoplay and playback is silent despite reporting "playing".
+   */
+  async prepareAudio(): Promise<void> {
+    await this.spotify.activate();
+  }
+
+  /**
    * The main action: record a clip, identify it, and start synced playback.
    * Captures clipStartPerf precisely so the recognition offset has a real anchor.
    */

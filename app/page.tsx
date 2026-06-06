@@ -88,6 +88,14 @@ export default function Home() {
     return controllerRef.current;
   }, [getToken]);
 
+  // Warm up the Spotify player once connected so the click handler only has to
+  // run the fast activate() within the user-gesture window.
+  useEffect(() => {
+    if (connected) {
+      ensureController().connectSpotify().catch(() => {});
+    }
+  }, [connected, ensureController]);
+
   // --- Actions ----------------------------------------------------------------
   const handleListen = async () => {
     setTrack(null);
@@ -96,6 +104,10 @@ export default function Home() {
     controller.setUserTrimMs(trimMs);
     try {
       await controller.connectSpotify();
+      // Unlock browser audio inside this click gesture, BEFORE the ~6s record +
+      // identify pipeline. Otherwise the gesture expires and autoplay is blocked,
+      // so Spotify reports "playing" but nothing is audible.
+      await controller.prepareAudio();
     } catch (e: any) {
       setPhase("error");
       setDetail(e?.message ?? "Could not connect Spotify player.");
