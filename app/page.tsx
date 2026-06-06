@@ -3,7 +3,10 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SyncController } from "./lib/syncController";
+import { getCookie, setCookie } from "./lib/clientCookies";
 import type { IdentifyResult, SyncPhase } from "./lib/types";
+
+const OFFSET_COOKIE = "s2m_offset_ms";
 
 const PHASE_LABEL: Record<SyncPhase, string> = {
   idle: "Ready",
@@ -74,6 +77,14 @@ export default function Home() {
     }
   }, []);
 
+  // Restore the saved offset trim.
+  useEffect(() => {
+    const saved = getCookie(OFFSET_COOKIE);
+    if (saved !== null && Number.isFinite(Number(saved))) {
+      setTrimMs(Number(saved));
+    }
+  }, []);
+
   const ensureController = useCallback((): SyncController => {
     if (!controllerRef.current) {
       controllerRef.current = new SyncController(getToken, {
@@ -108,6 +119,9 @@ export default function Home() {
       // identify pipeline. Otherwise the gesture expires and autoplay is blocked,
       // so Spotify reports "playing" but nothing is audible.
       await controller.prepareAudio();
+      // Stop any current playback so our own audio doesn't bleed into the mic
+      // while re-listening.
+      await controller.stop();
     } catch (e: any) {
       setPhase("error");
       setDetail(e?.message ?? "Could not connect Spotify player.");
@@ -116,14 +130,19 @@ export default function Home() {
     await controller.listenAndSync();
   };
 
-  const handleTrim = (value: number) => {
+  const persistTrim = (value: number) => {
     setTrimMs(value);
+    setCookie(OFFSET_COOKIE, String(Math.round(value)));
+  };
+
+  const handleTrim = (value: number) => {
+    persistTrim(value);
     controllerRef.current?.setUserTrimMs(value);
   };
 
   const handleNudge = (delta: number) => {
     controllerRef.current?.nudge(delta).catch(() => {});
-    setTrimMs((t) => t + delta);
+    persistTrim(trimMs + delta);
   };
 
   const handleStop = () => {
@@ -202,8 +221,18 @@ export default function Home() {
           onClick={handleListen}
           disabled={!connected || busy}
         >
-          {busy ? PHASE_LABEL[phase] : "🎙️ Listen & Sync"}
+          {busy ? PHASE_LABEL[phase] : phase === "playing" ? "🔄 Re-sync" : "🎙️ Listen & Sync"}
         </button>
+
+        {phase === "playing" && (
+          <button
+            className="btn-primary"
+            onClick={handleStop}
+            style={{ marginTop: 10, background: "var(--danger)", color: "#2b0606" }}
+          >
+            ⏹ Stop
+          </button>
+        )}
 
         <div className="row" style={{ marginTop: 14 }}>
           <span className="status">
@@ -255,15 +284,13 @@ export default function Home() {
             onClick={() => controllerRef.current?.correctDrift().catch(() => {})}
             disabled={phase !== "playing"}
           >
-            Re-sync
-          </button>
-          <button className="btn-ghost" onClick={handleStop} disabled={phase !== "playing"}>
-            Stop
+            Re-align
           </button>
         </div>
         <p className="hint" style={{ marginTop: 12 }}>
           If Spotify lags behind the room, nudge <strong>+</strong>; if it&apos;s ahead,
-          nudge <strong>−</strong>. The app remembers the learned latency for next time.
+          nudge <strong>−</strong>. Your offset is saved for next time, and the app also
+          learns its own latency.
         </p>
       </div>
     </main>
