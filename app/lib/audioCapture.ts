@@ -30,13 +30,26 @@ export class AudioCapture {
   async init(): Promise<void> {
     if (this.ctx) return;
 
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-      },
-    });
+    // getUserMedia only exists in a secure context (HTTPS or localhost) and is
+    // blocked in cross-origin iframes that don't grant microphone permission.
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error(
+        "Microphone access isn't available here. Open the app in its own browser " +
+          "tab over HTTPS (not inside an embedded preview/iframe)."
+      );
+    }
+
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
+      });
+    } catch (err) {
+      throw new Error(describeMicError(err));
+    }
 
     this.ctx = new AudioContext();
     await this.ctx.audioWorklet.addModule("/recorder-worklet.js");
@@ -111,6 +124,31 @@ export class AudioCapture {
     this.stream = null;
     this.node = null;
     this.source = null;
+  }
+}
+
+/** Turn a getUserMedia DOMException into actionable guidance. */
+function describeMicError(err: unknown): string {
+  const name = (err as DOMException)?.name ?? "";
+  switch (name) {
+    case "NotAllowedError":
+    case "SecurityError":
+      return (
+        "Microphone permission was blocked. Click the 🔒/camera icon in the address " +
+        "bar, set Microphone to Allow, then reload. If the app is inside an embedded " +
+        "preview, open it in its own browser tab. On macOS, also check System " +
+        "Settings → Privacy & Security → Microphone for your browser."
+      );
+    case "NotFoundError":
+    case "DevicesNotFoundError":
+      return "No microphone was found. Connect/enable a mic and try again.";
+    case "NotReadableError":
+      return "The microphone is in use by another app. Close it and try again.";
+    default:
+      return (
+        "Couldn't access the microphone" +
+        ((err as Error)?.message ? `: ${(err as Error).message}` : ".")
+      );
   }
 }
 
