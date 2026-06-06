@@ -22,6 +22,7 @@ export default function Home() {
   const [track, setTrack] = useState<IdentifyResult | null>(null);
   const [trimMs, setTrimMs] = useState(0);
   const [drift, setDrift] = useState<number | null>(null);
+  const [credStatus, setCredStatus] = useState<{ acr: boolean; spotify: boolean } | null>(null);
 
   const controllerRef = useRef<SyncController | null>(null);
   const tokenCache = useRef<{ token: string; expiresAt: number } | null>(null);
@@ -49,6 +50,19 @@ export default function Home() {
     fetch("/api/spotify/token")
       .then((r) => setConnected(r.ok))
       .catch(() => setConnected(false));
+
+    // Read back what the server actually sees, so it's obvious whether saved
+    // credentials are reaching it (the cookie is being sent) vs. not.
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((d) => {
+        const s = d.settings;
+        setCredStatus({
+          acr: s.acrHost?.isSet && s.acrAccessKey?.isSet && s.acrAccessSecret?.isSet,
+          spotify: s.spotifyClientId?.isSet && s.spotifyClientSecret?.isSet,
+        });
+      })
+      .catch(() => setCredStatus(null));
 
     const params = new URLSearchParams(window.location.search);
     if (params.get("spotify_error")) {
@@ -148,6 +162,23 @@ export default function Home() {
           <p className="hint" style={{ marginTop: 12 }}>
             Spotify <strong>Premium</strong> is required to play full tracks in the
             browser.
+          </p>
+        )}
+
+        {credStatus && (!credStatus.acr || !credStatus.spotify) && (
+          <p className="hint" style={{ marginTop: 12 }}>
+            Server sees:{" "}
+            <span className={credStatus.spotify ? "badge ok" : "badge"}>
+              Spotify creds {credStatus.spotify ? "✓" : "missing"}
+            </span>{" "}
+            <span className={credStatus.acr ? "badge ok" : "badge"}>
+              ACRCloud creds {credStatus.acr ? "✓" : "missing"}
+            </span>
+            <br />
+            If these show “missing” right after you saved them on{" "}
+            <Link href="/settings">Settings</Link>, your credentials cookie isn’t
+            reaching the server — make sure you saved on this same URL and that the
+            browser allows cookies.
           </p>
         )}
       </div>

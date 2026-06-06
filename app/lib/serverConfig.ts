@@ -111,3 +111,12 @@ export function settingsCookieOptions() {
     maxAge: 60 * 60 * 24 * 365, // 1 year
   };
 }
+
+/**
+ * The Spotify redirect URI to use. If the user didn't set one explicitly, derive
+ * it from the request origin (e.g. https://your-app.vercel.app/api/spotify/callback)
+ * so it works out of the box and stays consistent between login and callback.
+ */
+export function resolveRedirectUri(cfg: ResolvedConfig, origin: string): string {
+  return cfg.spotifyRedirectUri || `${origin}/api/spotify/callback`;
+}

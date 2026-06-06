@@ -5,18 +5,27 @@ import {
   SETTINGS_COOKIE,
   parseSettingsCookie,
   resolveConfig,
+  resolveRedirectUri,
 } from "@/app/lib/serverConfig";
 
 export const runtime = "nodejs";
 
 /** Redirects the browser to Spotify's authorization page. */
 export async function GET(req: NextRequest) {
-  const { spotifyClientId: clientId, spotifyRedirectUri: redirectUri } =
-    resolveConfig(parseSettingsCookie(req.cookies.get(SETTINGS_COOKIE)?.value));
+  const cfg = resolveConfig(
+    parseSettingsCookie(req.cookies.get(SETTINGS_COOKIE)?.value)
+  );
+  const clientId = cfg.spotifyClientId;
+  const redirectUri = resolveRedirectUri(cfg, req.nextUrl.origin);
 
-  if (!clientId || !redirectUri) {
+  const missing: string[] = [];
+  if (!cfg.spotifyClientId) missing.push("Spotify client ID");
+  if (!cfg.spotifyClientSecret) missing.push("Spotify client secret");
+  if (missing.length > 0) {
     return NextResponse.json(
-      { error: "Spotify is not configured. Add credentials on the Settings page." },
+      {
+        error: `Missing ${missing.join(" and ")}. Open the Settings page (⚙️), enter these, and click "Save credentials" in the same browser you're using here.`,
+      },
       { status: 500 }
     );
   }

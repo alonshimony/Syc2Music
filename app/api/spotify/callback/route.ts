@@ -4,6 +4,7 @@ import {
   SETTINGS_COOKIE,
   parseSettingsCookie,
   resolveConfig,
+  resolveRedirectUri,
 } from "@/app/lib/serverConfig";
 
 export const runtime = "nodejs";
@@ -31,6 +32,9 @@ export async function GET(req: NextRequest) {
   const cfg = resolveConfig(
     parseSettingsCookie(req.cookies.get(SETTINGS_COOKIE)?.value)
   );
+  // Use the same redirect URI the login step used (derived from origin if unset),
+  // since Spotify requires the token exchange to echo the exact value.
+  cfg.spotifyRedirectUri = resolveRedirectUri(cfg, req.nextUrl.origin);
 
   let tokens;
   try {

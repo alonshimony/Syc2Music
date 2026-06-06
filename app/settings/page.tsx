@@ -29,9 +29,9 @@ const CRED_FIELDS: { key: FieldKey; label: string; hint?: string; placeholder?: 
   { key: "spotifyClientSecret", label: "Spotify client secret" },
   {
     key: "spotifyRedirectUri",
-    label: "Spotify redirect URI",
-    hint: "Must exactly match a redirect URI in your Spotify app settings.",
-    placeholder: "http://localhost:3000/api/spotify/callback",
+    label: "Spotify redirect URI (optional)",
+    hint: "Leave blank to auto-use the address shown below. Whatever value is used must be listed exactly in your Spotify app's Redirect URIs.",
+    placeholder: "(auto: this site + /api/spotify/callback)",
   },
 ];
 
@@ -43,6 +43,7 @@ export default function SettingsPage() {
 
   const [sync, setSync] = useState<SyncSettings>(DEFAULT_SYNC_SETTINGS);
   const [syncMsg, setSyncMsg] = useState("");
+  const [origin, setOrigin] = useState("");
 
   // Load server credential config + local sync tuning.
   useEffect(() => {
@@ -60,7 +61,12 @@ export default function SettingsPage() {
       .catch(() => setCredMsg("Failed to load settings."));
 
     setSync(loadSyncSettings());
+    setOrigin(window.location.origin);
   }, []);
+
+  const effectiveRedirect =
+    (form.spotifyRedirectUri && form.spotifyRedirectUri.trim()) ||
+    (origin ? `${origin}/api/spotify/callback` : "");
 
   const saveCredentials = async () => {
     setSaving(true);
@@ -162,6 +168,20 @@ export default function SettingsPage() {
             {saving ? "Saving…" : "Save credentials"}
           </button>
           {credMsg && <span className="hint" style={{ marginLeft: 12 }}>{credMsg}</span>}
+        </div>
+
+        <div className="panel" style={{ marginTop: 16, marginBottom: 0, background: "var(--panel-2)" }}>
+          <label className="field" style={{ marginBottom: 6 }}>
+            Add this exact Redirect URI to your Spotify app
+          </label>
+          <code style={{ wordBreak: "break-all", fontSize: 13 }}>
+            {effectiveRedirect || "…"}
+          </code>
+          <p className="hint" style={{ marginTop: 8, marginBottom: 0 }}>
+            In the Spotify Developer Dashboard → your app → <em>Edit settings</em> →
+            <em> Redirect URIs</em>, paste the URL above and save. It must match
+            character-for-character.
+          </p>
         </div>
       </div>
 
