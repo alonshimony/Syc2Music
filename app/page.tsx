@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SyncController } from "./lib/syncController";
 import { getCookie, setCookie } from "./lib/clientCookies";
+import { loadSyncSettings } from "./lib/syncSettings";
 import type { IdentifyResult, SyncPhase } from "./lib/types";
 
 const OFFSET_COOKIE = "s2m_offset_ms";
@@ -14,9 +15,13 @@ const PHASE_LABEL: Record<SyncPhase, string> = {
   identifying: "Identifying…",
   syncing: "Syncing…",
   playing: "Playing — in sync",
+  waiting: "Waiting for the next song…",
   no_match: "No match found",
   error: "Error",
 };
+
+/** Phases during which a session is running (Stop is meaningful). */
+const ACTIVE_PHASES: SyncPhase[] = ["listening", "identifying", "syncing", "playing", "waiting"];
 
 export default function Home() {
   const [connected, setConnected] = useState<boolean | null>(null);
@@ -26,6 +31,7 @@ export default function Home() {
   const [trimMs, setTrimMs] = useState(0);
   const [drift, setDrift] = useState<number | null>(null);
   const [credStatus, setCredStatus] = useState<{ acr: boolean; spotify: boolean } | null>(null);
+  const [autoFollow, setAutoFollow] = useState(true);
 
   const controllerRef = useRef<SyncController | null>(null);
   const tokenCache = useRef<{ token: string; expiresAt: number } | null>(null);
@@ -77,12 +83,13 @@ export default function Home() {
     }
   }, []);
 
-  // Restore the saved offset trim.
+  // Restore the saved offset trim, and read whether follow mode is on.
   useEffect(() => {
     const saved = getCookie(OFFSET_COOKIE);
     if (saved !== null && Number.isFinite(Number(saved))) {
       setTrimMs(Number(saved));
     }
+    setAutoFollow(loadSyncSettings().autoFollow);
   }, []);
 
   const ensureController = useCallback((): SyncController => {
@@ -119,44 +126,35 @@ export default function Home() {
       // identify pipeline. Otherwise the gesture expires and autoplay is blocked,
       // so Spotify reports "playing" but nothing is audible.
       await controller.prepareAudio();
-      // Stop any current playback so our own audio doesn't bleed into the mic
-      // while re-listening.
-      await controller.stop();
     } catch (e: any) {
       setPhase("error");
       setDetail(e?.message ?? "Could not connect Spotify player.");
       return;
     }
-    await controller.listenAndSync();
+    // start() stops any running session (and our playback, so it doesn't bleed
+    // into the mic) before listening again.
+    await controller.start();
   };
 
-  const persistTrim = (value: number) => {
-    setTrimMs(value);
-    setCookie(OFFSET_COOKIE, String(Math.round(value)));
-  };
-
+  // Every offset change goes through here: saved to the cookie and handed to the
+  // controller, which re-aligns playback to the new offset right away.
   const handleTrim = (value: number) => {
-    persistTrim(value);
-    controllerRef.current?.setUserTrimMs(value);
+    const rounded = Math.round(value);
+    setTrimMs(rounded);
+    setCookie(OFFSET_COOKIE, String(rounded));
+    controllerRef.current?.setUserTrimMs(rounded);
   };
 
-  const handleNudge = (delta: number) => {
-    controllerRef.current?.nudge(delta).catch(() => {});
-    persistTrim(trimMs + delta);
-  };
+  const handleNudge = (delta: number) => handleTrim(trimMs + delta);
 
   const handleStop = () => {
-    controllerRef.current?.stop().catch(() => {});
-    setPhase("idle");
+    if (controllerRef.current) controllerRef.current.stop().catch(() => {});
+    else setPhase("idle");
   };
 
-  const busy = phase === "listening" || phase === "identifying" || phase === "syncing";
-  const dotClass =
-    phase === "error" || phase === "no_match"
-      ? "dot error"
-      : busy || phase === "playing"
-        ? "dot live"
-        : "dot";
+  const active = ACTIVE_PHASES.includes(phase);
+  const isError = phase === "error" || phase === "no_match";
+  const dotClass = isError ? "dot error" : active ? "dot live" : "dot";
 
   return (
     <main className="wrap">
@@ -216,15 +214,11 @@ export default function Home() {
 
       {/* Main control */}
       <div className="panel">
-        <button
-          className="btn-primary"
-          onClick={handleListen}
-          disabled={!connected || busy}
-        >
-          {busy ? PHASE_LABEL[phase] : phase === "playing" ? "🔄 Re-sync" : "🎙️ Listen & Sync"}
+        <button className="btn-primary" onClick={handleListen} disabled={!connected}>
+          {active ? "🔄 Re-sync" : "🎙️ Listen & Sync"}
         </button>
 
-        {phase === "playing" && (
+        {active && (
           <button
             className="btn-primary"
             onClick={handleStop}
@@ -234,18 +228,28 @@ export default function Home() {
           </button>
         )}
 
-        <div className="row" style={{ marginTop: 14 }}>
+        <div className="row between" style={{ marginTop: 14 }}>
           <span className="status">
             <span className={dotClass} />
             {PHASE_LABEL[phase]}
           </span>
+          <Link href="/settings" className="badge" style={{ textDecoration: "none" }}>
+            Auto-follow {autoFollow ? "on" : "off"}
+          </Link>
         </div>
-        {detail && <p className="error-text" style={{ marginTop: 8 }}>{detail}</p>}
+        {detail && (
+          <p className={isError ? "error-text" : "hint"} style={{ marginTop: 8 }}>
+            {detail}
+          </p>
+        )}
       </div>
 
       {/* Now playing */}
       {track && (
         <div className="panel">
+          <div className="meta" style={{ marginTop: 0, marginBottom: 6 }}>
+            {phase === "playing" || phase === "syncing" ? "Now playing" : "Last song"}
+          </div>
           <div className="track">
             <span className="title">{track.title}</span>
             <span className="artist">{track.artist}</span>
@@ -281,7 +285,7 @@ export default function Home() {
           </button>
           <button
             className="btn-ghost"
-            onClick={() => controllerRef.current?.correctDrift().catch(() => {})}
+            onClick={() => controllerRef.current?.realign().catch(() => {})}
             disabled={phase !== "playing"}
           >
             Re-align
@@ -289,8 +293,8 @@ export default function Home() {
         </div>
         <p className="hint" style={{ marginTop: 12 }}>
           If Spotify lags behind the room, nudge <strong>+</strong>; if it&apos;s ahead,
-          nudge <strong>−</strong>. Your offset is saved for next time, and the app also
-          learns its own latency.
+          nudge <strong>−</strong>. Changes apply immediately and are saved for next
+          time; the app also learns Spotify&apos;s start-up and seek delays on its own.
         </p>
       </div>
     </main>

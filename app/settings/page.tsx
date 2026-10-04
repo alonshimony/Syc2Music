@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { AppSettings, ConfigSource } from "../lib/serverConfig";
 import {
   DEFAULT_SYNC_SETTINGS,
@@ -110,7 +110,8 @@ export default function SettingsPage() {
 
   const clearLearnedLatency = () => {
     window.localStorage.removeItem("s2m_start_latency_ms");
-    setSyncMsg("Cleared the learned start-latency.");
+    window.localStorage.removeItem("s2m_seek_latency_ms");
+    setSyncMsg("Cleared the learned start-up and seek latencies.");
   };
 
   const sourceBadge = (f: FieldDesc) => {
@@ -228,6 +229,44 @@ export default function SettingsPage() {
           value={sync.latencyLearnRate}
           onChange={(v) => setSync((s) => ({ ...s, latencyLearnRate: v }))}
         />
+        <CheckboxField
+          label="Auto-compensate output latency"
+          hint="Adds the delay your browser reports for the speakers/headphones (Bluetooth can be 150–300 ms) so you don't have to trim it by hand."
+          checked={sync.autoOutputLatency}
+          onChange={(v) => setSync((s) => ({ ...s, autoOutputLatency: v }))}
+        />
+
+        <h3 style={{ fontSize: 15, margin: "20px 0 10px" }}>When the song changes</h3>
+        <CheckboxField
+          label="Auto-follow the next song"
+          hint="When the song ends, pause Spotify (so its Autoplay can't take over), listen to the room, and sync the next song automatically."
+          checked={sync.autoFollow}
+          onChange={(v) => setSync((s) => ({ ...s, autoFollow: v }))}
+        />
+        <NumberField
+          label="Next-song clip duration (ms)"
+          hint="How long to listen at a song change. Shorter = shorter silence between songs; too short and matches get less reliable."
+          min={2000}
+          max={15000}
+          step={500}
+          value={sync.followClipDurationMs}
+          onChange={(v) => setSync((s) => ({ ...s, followClipDurationMs: v }))}
+        />
+        <NumberField
+          label="Mid-song check every (seconds, 0 = off)"
+          hint="Re-identifies the room while playing: catches a DJ cutting to a new song early, and re-aligns against the real room audio. Minimum 20 s."
+          min={0}
+          max={600}
+          step={5}
+          value={sync.changeCheckIntervalSec}
+          onChange={(v) => setSync((s) => ({ ...s, changeCheckIntervalSec: v }))}
+        />
+        <CheckboxField
+          label="Mute Spotify during mid-song checks"
+          hint="Needed when Spotify plays through speakers the mic can hear (otherwise the app hears itself). Turn off if you listen on headphones — then checks are silent to you."
+          checked={sync.muteDuringCheck}
+          onChange={(v) => setSync((s) => ({ ...s, muteDuringCheck: v }))}
+        />
 
         <div className="row" style={{ marginTop: 8, gap: 8, flexWrap: "wrap" }}>
           <button className="btn-primary" onClick={saveSync} style={{ width: "auto" }}>
@@ -261,10 +300,14 @@ function NumberField({
   max: number;
   step: number;
 }) {
+  const id = useId();
   return (
     <div style={{ marginBottom: 16 }}>
-      <label className="field" style={{ marginBottom: 6 }}>{label}</label>
+      <label className="field" htmlFor={id} style={{ marginBottom: 6 }}>
+        {label}
+      </label>
       <input
+        id={id}
         type="number"
         value={value}
         min={min}
@@ -274,6 +317,33 @@ function NumberField({
         style={inputStyle}
       />
       {hint && <p className="hint" style={{ marginTop: 6 }}>{hint}</p>}
+    </div>
+  );
+}
+
+function CheckboxField({
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <label className="row" style={{ gap: 10, cursor: "pointer", fontSize: 14 }}>
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+          style={{ width: 18, height: 18, accentColor: "var(--accent)" }}
+        />
+        {label}
+      </label>
+      {hint && <p className="hint" style={{ marginTop: 6, marginLeft: 28 }}>{hint}</p>}
     </div>
   );
 }

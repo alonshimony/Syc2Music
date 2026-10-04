@@ -4,8 +4,9 @@
 // possible, the `performance.now()` instant corresponding to the START of the clip
 // we send for recognition. ACRCloud's play_offset_ms is the song position at that
 // instant, so any error in the anchor translates directly into sync error. The
-// worklet hands us raw PCM frame-by-frame; we map the AudioContext clock to
-// performance.now() via getOutputTimestamp() at the moment the first frame arrives.
+// worklet tags every block with the audio-clock time it was captured in; we map
+// that to performance.now() via getOutputTimestamp() and subtract the device
+// latencies, so the anchor is the moment the sound actually hit the microphone.
 
 export interface CapturedClip {
   /** 16-bit PCM mono WAV. */
@@ -13,6 +14,15 @@ export interface CapturedClip {
   /** performance.now() corresponding to the first captured sample. */
   clipStartPerf: number;
   sampleRate: number;
+}
+
+/** Microphone problems (permission, missing device) — not worth retrying. */
+export class MicError extends Error {}
+
+interface WorkletFrame {
+  samples: Float32Array;
+  /** AudioContext time of the render quantum the samples were captured in. */
+  time: number;
 }
 
 export class AudioCapture {
@@ -25,6 +35,17 @@ export class AudioCapture {
   private collecting = false;
   private clipStartPerf = 0;
   private sawFirstFrame = false;
+  private inputLatencyMs = 0;
+
+  /**
+   * How long the default output device takes to make a sample audible (ms).
+   * Spotify plays through the same device, so its playback must run this far
+   * ahead of the room to be heard in sync. 0 when the browser doesn't report it.
+   */
+  get outputLatencyMs(): number {
+    const latency = this.ctx?.outputLatency;
+    return typeof latency === "number" && Number.isFinite(latency) ? latency * 1000 : 0;
+  }
 
   /** Ask for mic permission and wire up the worklet graph (idempotent). */
   async init(): Promise<void> {
@@ -33,7 +54,7 @@ export class AudioCapture {
     // getUserMedia only exists in a secure context (HTTPS or localhost) and is
     // blocked in cross-origin iframes that don't grant microphone permission.
     if (!navigator.mediaDevices?.getUserMedia) {
-      throw new Error(
+      throw new MicError(
         "Microphone access isn't available here. Open the app in its own browser " +
           "tab over HTTPS (not inside an embedded preview/iframe)."
       );
@@ -48,8 +69,15 @@ export class AudioCapture {
         },
       });
     } catch (err) {
-      throw new Error(describeMicError(err));
+      throw new MicError(describeMicError(err));
     }
+
+    // Chrome reports the capture pipeline latency in the track settings.
+    const settings = this.stream.getAudioTracks()[0]?.getSettings() as
+      | (MediaTrackSettings & { latency?: number })
+      | undefined;
+    this.inputLatencyMs =
+      typeof settings?.latency === "number" ? settings.latency * 1000 : 0;
 
     this.ctx = new AudioContext();
     await this.ctx.audioWorklet.addModule("/recorder-worklet.js");
@@ -57,13 +85,13 @@ export class AudioCapture {
     this.source = this.ctx.createMediaStreamSource(this.stream);
     this.node = new AudioWorkletNode(this.ctx, "recorder-processor");
 
-    this.node.port.onmessage = (e: MessageEvent<Float32Array>) => {
+    this.node.port.onmessage = (e: MessageEvent<WorkletFrame>) => {
       if (!this.collecting) return;
       if (!this.sawFirstFrame) {
         this.sawFirstFrame = true;
-        this.clipStartPerf = this.estimateFrameStartPerf();
+        this.clipStartPerf = this.captureTimeToPerf(e.data.time);
       }
-      this.chunks.push(e.data);
+      this.chunks.push(e.data.samples);
     };
 
     // Route through a zero-gain node so the graph pulls audio without echoing it out.
@@ -75,32 +103,56 @@ export class AudioCapture {
   }
 
   /**
-   * Map the audio render clock to performance.now() for the just-arrived frame.
-   * getOutputTimestamp() gives {contextTime, performanceTime}; we offset by how far
-   * the context clock has advanced past that reference.
+   * performance.now() at which audio that the graph processed at audio-clock time
+   * `contextTime` actually reached the microphone.
+   *
+   * getOutputTimestamp() maps the audio clock to the moment a frame is *heard*
+   * from the output device. Processing happens (baseLatency + outputLatency)
+   * before that, and the input samples fed into that processing were captured
+   * inputLatency earlier still.
    */
-  private estimateFrameStartPerf(): number {
+  private captureTimeToPerf(contextTime: number): number {
     const ctx = this.ctx!;
     const ts = ctx.getOutputTimestamp?.();
-    if (ts && typeof ts.performanceTime === "number" && ts.contextTime != null) {
-      const ahead = (ctx.currentTime - ts.contextTime) * 1000;
-      return ts.performanceTime + ahead;
+    if (!ts?.performanceTime || ts.contextTime == null) {
+      // No clock mapping available: the frame was captured roughly one
+      // quantum (+ input latency) before it reached us.
+      return performance.now() - (128 / ctx.sampleRate) * 1000 - this.inputLatencyMs;
     }
-    // Fallback if getOutputTimestamp is unavailable.
-    return performance.now();
+    const heardAt = ts.performanceTime + (contextTime - ts.contextTime) * 1000;
+    const processingToHeardMs = ((ctx.baseLatency || 0) * 1000) + this.outputLatencyMs;
+    return heardAt - processingToHeardMs - this.inputLatencyMs;
   }
 
-  /** Record `durationMs` of audio, then resolve with the encoded clip + anchor. */
-  async recordClip(durationMs = 6000): Promise<CapturedClip> {
+  /**
+   * Record `durationMs` of audio, then resolve with the encoded clip + anchor.
+   * Rejects with an AbortError if `signal` fires (e.g. the user pressed Stop).
+   */
+  async recordClip(durationMs = 6000, signal?: AbortSignal): Promise<CapturedClip> {
     if (!this.ctx) await this.init();
     if (this.ctx!.state === "suspended") await this.ctx!.resume();
+    if (this.collecting) throw new Error("Already recording.");
+    throwIfAborted(signal);
 
     this.chunks = [];
     this.sawFirstFrame = false;
     this.collecting = true;
 
-    await new Promise((r) => setTimeout(r, durationMs));
-    this.collecting = false;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, durationMs);
+        signal?.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timer);
+            reject(new DOMException("Recording cancelled", "AbortError"));
+          },
+          { once: true }
+        );
+      });
+    } finally {
+      this.collecting = false;
+    }
 
     const sampleRate = this.ctx!.sampleRate;
     const pcm = mergeChunks(this.chunks);
@@ -125,6 +177,10 @@ export class AudioCapture {
     this.node = null;
     this.source = null;
   }
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException("Recording cancelled", "AbortError");
 }
 
 /** Turn a getUserMedia DOMException into actionable guidance. */

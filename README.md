@@ -35,6 +35,17 @@ Spotify Web Playback SDK: seek + play  ──►  drift-correction loop refines 
 
 See `app/lib/syncMath.ts` for the (unit-tested) core math.
 
+### When the song changes (follow mode)
+
+While playing, the app reads Spotify's local state every second. When the song
+ends — or Spotify's Autoplay swaps in a different track — it pauses Spotify, listens
+to the room again, and syncs the next song. If the room is still finishing a longer
+version of the same song it waits; with no recognizable music it keeps retrying for
+up to 3 minutes. Optional mid-song checks (Settings) catch a DJ cutting to a new song
+early and re-align against the real room audio. Drift is re-checked every 10 s, and
+the app learns Spotify's start-up and seek delays separately. The decision logic
+lives in `app/lib/followLogic.ts` (unit-tested).
+
 ## Prerequisites
 
 - **Node 18+**

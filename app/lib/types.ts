@@ -29,5 +29,7 @@ export type SyncPhase =
   | "identifying"
   | "syncing"
   | "playing"
+  /** Follow mode: the song ended (or no music yet) — listening for the next one. */
+  | "waiting"
   | "no_match"
   | "error";
